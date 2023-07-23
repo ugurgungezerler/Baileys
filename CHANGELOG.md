@@ -1,9 +1,9 @@
-# 6.1.0 (2023-05-26)
+# 6.4.0 (2023-07-18)
 
 
-### Bug Fixes
+### Features
 
-* onWhatsApp query for multiple jids ([#85](https://github.com/WhiskeySockets/Baileys/issues/85)) ([bb25723](https://github.com/WhiskeySockets/Baileys/commit/bb25723b6ac019ec790c22b95738cc14a725f32a))
+* Whatsapp v2.2329.9 proto/version change ([#169](https://github.com/WhiskeySockets/Baileys/issues/169)) ([a84f75e](https://github.com/WhiskeySockets/Baileys/commit/a84f75ef2a3af231454efca28bdf3d590a751812))
 
 
 

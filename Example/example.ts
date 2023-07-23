@@ -1,6 +1,7 @@
 import { Boom } from '@hapi/boom'
 import NodeCache from 'node-cache'
-import makeWASocket, { AnyMessageContent, delay, DisconnectReason, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, makeCacheableSignalKeyStore, makeInMemoryStore, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
+import readline from 'readline'
+import makeWASocket, { AnyMessageContent, delay, DisconnectReason, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, makeCacheableSignalKeyStore, makeInMemoryStore, PHONENUMBER_MCC, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
 import MAIN_LOGGER from '../src/Utils/logger'
 
 const logger = MAIN_LOGGER.child({})
@@ -8,10 +9,16 @@ logger.level = 'trace'
 
 const useStore = !process.argv.includes('--no-store')
 const doReplies = !process.argv.includes('--no-reply')
+const usePairingCode = process.argv.includes('--use-pairing-code')
+const useMobile = process.argv.includes('--mobile')
 
 // external map to store retry counts of messages when decryption/encryption fails
 // keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
 const msgRetryCounterCache = new NodeCache()
+
+// Read line interface
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+const question = (text: string) => new Promise<string>((resolve) => rl.question(text, resolve))
 
 // the store maintains the data of the WA connection in memory
 // can be written out to a file & read from it
@@ -32,7 +39,8 @@ const startSock = async() => {
 	const sock = makeWASocket({
 		version,
 		logger,
-		printQRInTerminal: true,
+		printQRInTerminal: !usePairingCode,
+		mobile: useMobile,
 		auth: {
 			creds: state.creds,
 			/** caching makes the store faster to send/recv messages */
@@ -48,6 +56,76 @@ const startSock = async() => {
 	})
 
 	store?.bind(sock.ev)
+
+	// Pairing code for Web clients
+	if(usePairingCode && !sock.authState.creds.registered) {
+		if(useMobile) {
+			throw new Error('Cannot use pairing code with mobile api')
+		}
+
+		const phoneNumber = await question('Please enter your mobile phone number:\n')
+		const code = await sock.requestPairingCode(phoneNumber)
+		console.log(`Pairing code: ${code}`)
+	}
+
+	// If mobile was chosen, ask for the code
+	if(useMobile && !sock.authState.creds.registered) {
+		const { registration } = sock.authState.creds || { registration: {} }
+
+		if(!registration.phoneNumber) {
+			registration.phoneNumber = await question('Please enter your mobile phone number:\n')
+		}
+
+		const libPhonenumber = await import("libphonenumber-js")
+		const phoneNumber = libPhonenumber.parsePhoneNumber(registration!.phoneNumber)
+		if(!phoneNumber?.isValid()) {
+			throw new Error('Invalid phone number: ' + registration!.phoneNumber)
+		}
+
+		registration.phoneNumber = phoneNumber.format('E.164')
+		registration.phoneNumberCountryCode = phoneNumber.countryCallingCode
+		registration.phoneNumberNationalNumber = phoneNumber.nationalNumber
+		const mcc = PHONENUMBER_MCC[phoneNumber.countryCallingCode]
+		if(!mcc) {
+			throw new Error('Could not find MCC for phone number: ' + registration!.phoneNumber + '\nPlease specify the MCC manually.')
+		}
+
+		registration.phoneNumberMobileCountryCode = mcc
+
+		async function enterCode() {
+			try {
+				const code = await question('Please enter the one time code:\n')
+				const response = await sock.register(code.replace(/["']/g, '').trim().toLowerCase())
+				console.log('Successfully registered your phone number.')
+				console.log(response)
+				rl.close()
+			} catch(error) {
+				console.error('Failed to register your phone number. Please try again.\n', error)
+				await askForOTP()
+			}
+		}
+
+		async function askForOTP() {
+			let code = await question('How would you like to receive the one time code for registration? "sms" or "voice"\n')
+			code = code.replace(/["']/g, '').trim().toLowerCase()
+
+			if(code !== 'sms' && code !== 'voice') {
+				return await askForOTP()
+			}
+
+			registration.method = code
+
+			try {
+				await sock.requestRegistrationCode(registration)
+				await enterCode()
+			} catch(error) {
+				console.error('Failed to request registration code. Please try again.\n', error)
+				await askForOTP()
+			}
+		}
+
+		askForOTP()
+	}
 
 	const sendMessageWTyping = async(msg: AnyMessageContent, jid: string) => {
 		await sock.presenceSubscribe(jid)

@@ -1,4 +1,5 @@
 import type { proto } from '../../WAProto'
+import { RegistrationOptions } from '../Socket/registration'
 import type { Contact } from './Contact'
 import type { MinimalMessage } from './Message'
 
@@ -42,7 +43,8 @@ export type AccountSettings = {
 
 export type AuthenticationCreds = SignalCreds & {
     readonly noiseKey: KeyPair
-    readonly advSecretKey: string
+    readonly pairingEphemeralKeyPair: KeyPair
+    advSecretKey: string
 
     me?: Contact
     account?: proto.IADVSignedDeviceIdentity
@@ -58,6 +60,14 @@ export type AuthenticationCreds = SignalCreds & {
     /** number of times history & app state has been synced */
     accountSyncCounter: number
     accountSettings: AccountSettings
+	// mobile creds
+	deviceId: string
+	phoneId: string
+	identityId: Buffer
+	registered: boolean
+	backupToken: Buffer
+	registration: RegistrationOptions
+    pairingCode: string | undefined
 }
 
 export type SignalDataTypeMap = {
